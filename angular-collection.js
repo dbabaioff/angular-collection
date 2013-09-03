@@ -1,227 +1,307 @@
-/**
- * Angular Collection - The Collection module for AngularJS
- * @version v0.4.0 - 2013-08-19
- * @author Tomasz Kuklis
- * @license MIT License, http://www.opensource.org/licenses/MIT
- */
-(function(window, angular, undefined) {
-'use strict';
+(function (window, angular, undefined) {
+    'use strict';
 
-angular.module('ngCollection', []).
-  factory('$collection', ['$filter','$parse', function($filter,$parse) {
+    angular.module('ngCollection', []).
+        factory('$collection', ['$filter', '$parse', function ($filter, $parse) {
+            var _guid = function() {
+                var s4 = function() {
+                    return Math.floor((1 + Math.random()) * 0x10000).toString(16).substring(1);
+                };
 
-    function s4() {
-      return Math.floor((1 + Math.random()) * 0x10000)
-        .toString(16).substring(1);
-    }
+                return s4() + s4() + '-' + s4() + '-' + s4() +
+                    '-' + s4() + '-' + s4() + s4() + s4();
+            };
 
-    function guid() {
-      return s4() + s4() + '-' + s4() + '-' + s4() +
-        '-' +s4() + '-' + s4() + s4() + s4();
-    }
+            var _checkValue = function(item, compareFn) {
+                return compareFn(item);
+            };
 
-    function checkValue(item, compareFn){
-      return compareFn(item);
-    }
+            // Helper function to continue chaining intermediate results.
+            var _result = function(models) {
+                return this._chain ? (new Collection(models)).chain() : models;
+            };
 
-    function Collection(options) {
-      options || (options = {});
-      if (options.comparator !== void 0) this.comparator = options.comparator;
-      this.idAttribute = options.idAttribute || this.idAttribute;
-      this.current = null;
-      this._reset();
-      this.initialize.apply(this, arguments);
-    }
+            var Collection = function(models, options) {
+                options || (options = {});
 
-    Collection.prototype = {
+                if (options.comparator !== void 0) {
+                    this.comparator = options.comparator;
+                }
+                this.idAttribute = options.idAttribute || this.idAttribute;
 
-      idAttribute: 'id',
+                this._reset();
+                this.initialize.apply(this, arguments);
+                if (models) {
+                    this.add(models);
+                }
+            };
 
-      initialize: function() { },
+            angular.extend(Collection.prototype, {
+                idAttribute: 'id',
 
-      add: function(obj, options) {
-        options || (options = {});
-        var id, sort, sortAttr, existing;
-        sort = this.comparator && options.sort !== false;
-        sortAttr = angular.isString(this.comparator) ? this.comparator : null;
+                initialize: function() {},
 
-        if (!obj[this.idAttribute]) {
-          obj[this.idAttribute] = guid();
-        }
+                add: function (models, options) {
+                    options || (options = {});
 
-        if (existing = this.get(obj)) {
-          angular.extend(existing, obj);
-        } else {
-          id = obj[this.idAttribute];
+                    if ( ! angular.isArray(models)) {
+                        models = models ? [models] : [];
+                    }
 
-          this.hash[id] = obj;
-          this.array.push(obj);
-          this.length += 1;
-        }
+                    var i, l, model, existing, sort;
+                    var sort = (this.comparator && options.sort !== false);
 
-        if (sort) this.sort();
+                    for (i = 0, l = models.length; i < l; i++) {
+                        model = models[i];
 
-        return this;
-      },
+                        if ( ! model[this.idAttribute]) {
+                            model[this.idAttribute] = _guid();
+                        }
 
-      addAll: function(objArr, options) {
-        options || (options = {});
-        var sort = this.comparator && options.sort !== false;
+                        if (existing = this.get(model)) {
+                            angular.extend(existing, model);
+                        }
+                        else {
+                            var id = model[this.idAttribute];
 
-        for (var i = 0; i < objArr.length; i++) {
-          var obj = objArr[i];
-          this.add(obj, angular.extend(options, { sort: false }));
-        }
+                            this.hash[id] = model;
+                            this.array.push(model);
+                            this.length += 1;
+                        }
+                    }
 
-        if (sort) this.sort();
+                    if (sort) this.sort();
 
-        return this;
-      },
+                    return this;
+                },
 
-      sort: function() {
-        if (angular.isString(this.comparator)) {
-          this.array = $filter('orderBy')(this.array, this.comparator);
-        }
+                sort: function () {
+                    if (angular.isString(this.comparator)) {
+                        this.array = $filter('orderBy')(this.array, this.comparator);
+                    }
 
-        return this;
-      },
+                    return this;
+                },
 
-      get: function(obj) {
-        if (obj == null) return void 0;
-        return this.hash[obj[this.idAttribute] || obj];
-      },
+                get: function (obj) {
+                    if (obj == null) return void 0;
+                    return this.hash[obj[this.idAttribute] || obj];
+                },
 
-      find: function(expr, value, deepCompare){
-        var compareFn = expr;
-        if (typeof expr === 'string'){
-          var parse = $parse(expr);
-          compareFn = function(item){
-            if (deepCompare){
-              return parse(item) == value;
-            }
-            else{
-              return parse(item) === value;
-            }
-          }
-          compareFn.prototype.value = value;
-          compareFn.prototype.deepCompare = deepCompare;
-        }
-        //loop over all the items in the array
-        for (var i = 0; i < this.array.length; i++){
-          if(checkValue(this.array[i], compareFn)){
-            return this.array[i];
-          }
+                find: function (expr, value, deepCompare) {
+                    var value = this.where(expr, value, deepCompare, true);
 
-        }
-        //if nothing matches return void
-        return void 0;
-      },
+                    return _result.call(this, value);
+                },
 
-      where: function(expr, value, deepCompare){
+                where: function (expr, value, deepCompare, returnFirst) {
+                    var results = [];
 
-        var results = [];
+                    var compareFn ;
+                    if (angular.isFunction(expr)){
+                        compareFn = expr;
+                    } else {
+                        var compareObj = {};
+                        if (typeof expr === 'string'){
+                            compareObj[expr] = value;
+                        } else {
+                            compareObj = expr;
+                        }
 
-        var compareFn = expr;
-        if (typeof expr === 'string'){
-          var parse = $parse(expr);
-            compareFn = function(item){
-              if (deepCompare){
-                return parse(item) == value;
-              }
-              else{
-                return parse(item) === value;
-              }
-            }
-            compareFn.prototype.value = value;
-            compareFn.prototype.deepCompare = deepCompare;
-        }
+                        compareFn = function(obj)
+                        {
+                            for (var key in compareObj) {
 
-        //loop over all the items in the array
-        for (var i = 0; i < this.array.length; i++){
-          if(checkValue(this.array[i], compareFn)){
-            results.push(this.array[i]);
-          }
-        }
-        //if nothing matches return void
-        return results;
-      },
+                                if (compareObj[key] !== obj[key]) return false;
+                            }
+                            return true;
+                        }
+                    }
+                    if ( ! compareFn) {
+                        return false;
+                    }
 
-      update: function(obj) {
-        var existing;
-        existing = this.get(obj);
-        if (existing) angular.extend(existing, obj);
-        if (!existing) this.add(obj);
-        return this;
-      },
+                    //loop over all the items in the array
+                    for (var i = 0; i < this.array.length; i++) {
+                        if (_checkValue(this.array[i], compareFn)) {
+                            if (returnFirst) {
+                                return this.array[i];
+                            } else {
+                                results.push(this.array[i]);
+                            }
+                        }
+                    }
 
-      remove: function(obj) {
-        var index;
-        index = this.array.indexOf(obj)
-        if (index === -1) {
-          return this
-        }
-        delete this.hash[obj[this.idAttribute]];
-        this.array.splice(index, 1);
-        this.length--;
-        return this;
-      },
+                    var value =  (returnFirst) ? void 0 : results;
 
-      removeAll: function() {
-        for (var i = this.array.length - 1; i >= 0; i--) {
-          this.remove(this.at(i));
-        }
+                    return _result.call(this, value);
+                },
 
-        return this;
-      },
+                update: function (obj) {
+                    var existing;
+                    existing = this.get(obj);
+                    if (existing) angular.extend(existing, obj);
+                    if (!existing) this.add(obj);
 
-      last: function() {
-        return this.array[this.length-1];
-      },
+                    return this;
+                },
 
-      at: function(index) {
-        return this.array[index];
-      },
+                remove: function (models) {
+                    if ( ! angular.isArray(models)) {
+                        models = models ? [models] : [];
+                    }
 
-      size: function() {
-        return this.array.length;
-      },
+                    var i, l, index, model;
+                    for (i = 0, l = models.length; i < l; i++) {
+                        model = models[i];
+                        if ( ! model) continue;
 
-      all: function() {
-        return this.array;
-      },
+                        index = this.array.indexOf(models[i]);
+                        if (index === -1) {
+                            return this
+                        }
 
-      _reset: function() {
-        this.length = 0;
-        this.hash  = {};
-        this.array = [];
-      }
-    };
+                        delete this.hash[model[this.idAttribute]];
+                        this.array.splice(index, 1);
+                        this.length--;
+                    }
 
-    Collection.extend = function(protoProps) {
-      var parent = this;
-      var child;
-      if (protoProps && protoProps.hasOwnProperty('constructor')) {
-        child = protoProps.constructor;
-      } else {
-        child = function(){ return parent.apply(this, arguments); };
-      }
-      var Surrogate = function(){ this.constructor = child; };
-      Surrogate.prototype = parent.prototype;
-      child.prototype = new Surrogate;
+                    return this;
+                },
 
-      if (protoProps) angular.extend(child.prototype, protoProps);
+                removeAll: function () {
+                    this.remove(this.array);
 
-      child.extend = parent.extend;
-      child.getInstance = Collection.getInstance;
-      child._super = parent.prototype;
+                    return this;
+                },
 
-      return child;
-    };
+                removeWhere: function (expr, value, deepCompare) {
+                    var objects = this.where(expr, value, deepCompare);
+                    this.remove(objects);
 
-    Collection.getInstance = function(options) {
-      return new this(options);
-    };
+                    return this;
+                },
 
-    return Collection;
-  }]);
+                last: function () {
+                    return this.array[this.length - 1];
+                },
+
+                at: function (index) {
+                    return this.array[index];
+                },
+
+                size: function () {
+                    return this.array.length;
+                },
+
+                all: function () {
+                    return this.array;
+                },
+
+                toJSON: function() {
+                    var value = this.map(function(model){
+                        return angular.copy(model);
+                    });
+
+                    return _result.call(this, value);
+                },
+
+                each: function(iterator, context) {
+                    var nativeForEach = Array.prototype.forEach;
+
+                    if (nativeForEach && this.array.forEach === nativeForEach) {
+                        this.array.forEach(iterator, context);
+                    }
+                    else if (this.array.length === +this.array.length) {
+                        for (var i = 0, l = this.array.length; i < l; i++) {
+                            iterator.call(context, this.array[i], i, this.array);
+                        }
+                    }
+                },
+
+                map: function (iterator, context) {
+                    var results   = [],
+                        nativeMap = Array.prototype.map;
+
+                    if (nativeMap && this.array.map === nativeMap) {
+                        return this.array.map(iterator, context);
+                    }
+                    angular.forEach(this.array, function(value, index, list) {
+                        results.push(iterator.call(context, value, index, list));
+                    });
+
+                    var value = results;
+
+                    return _result.call(this, value);
+                },
+
+                filter: function(expression, comparator) {
+                    var value = $filter('filter')(this.array, expression, comparator);
+
+                    return _result.call(this, value);
+                },
+
+                pluck: function(key) {
+                    var value = this.map(function(value){
+                        return value[key];
+                    });
+
+                    return _result.call(this, value);
+                },
+
+                chain: function() {
+                    this._chain = true;
+
+                    return this;
+                },
+
+                clone: function() {
+                    return new this.constructor(this.array);
+                },
+
+                slice: function(begin, end) {
+                    return this.array.slice(begin, end);
+                },
+
+                _reset: function () {
+                    this.length = 0;
+                    this.hash   = {};
+                    this.array  = [];
+                }
+            });
+
+            Collection.extend = function (protoProps, staticProps) {
+                var parent = this;
+                var child;
+
+                if (protoProps && protoProps.hasOwnProperty('constructor')) {
+                    child = protoProps.constructor;
+                } else {
+                    child = function () {
+                        return parent.apply(this, arguments);
+                    };
+                }
+
+                angular.extend(child, parent, staticProps)
+
+                var Surrogate = function () {
+                    this.constructor = child;
+                };
+                Surrogate.prototype = parent.prototype;
+                child.prototype = new Surrogate;
+
+                if (protoProps) angular.extend(child.prototype, protoProps);
+
+                child.getInstance = Collection.getInstance;
+                child.__super__   = parent.prototype;
+
+                return child;
+            };
+
+            Collection.getInstance = function(models, options) {
+                return new this(models, options);
+            };
+
+            return Collection;
+        }]);
 })(window, window.angular);
